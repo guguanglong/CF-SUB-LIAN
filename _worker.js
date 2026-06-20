@@ -55,6 +55,7 @@ export default {
 		total = total * 1099511627776;
 		let expire = Math.floor(timestamp / 1000);
 		SUBUpdateTime = env.SUBUPTIME || SUBUpdateTime;
+		const isProxyClientUA = ['clash', 'meta', 'mihomo', 'sing-box', 'singbox', 'surge', 'quantumult', 'loon', 'nekobox', 'v2rayn', 'v2rayng', 'shadowrocket', 'subconverter'].some(keyword => userAgent.includes(keyword));
 
         // 如果路径既不是管理员，也不是访客，则拦截
 		if (!([mytoken, fakeToken, 访客订阅].includes(token) || url.pathname == ("/" + mytoken) || url.pathname.includes("/" + mytoken + "?") || guestPath)) {
@@ -71,11 +72,22 @@ export default {
 			if (env.KV) {
 				await 迁移地址列表(env, 'LINK.txt');
                 // 浏览器直接访问且不带转换参数时的UI分流逻辑
-				if (userAgent.includes('mozilla') && !url.search) {
+				if (userAgent.includes('mozilla') && !url.search && !isProxyClientUA) {
                     if (guestPath) {
                         // 访客访问：只渲染安全、去除了编辑功能的纯净展示页
                         return new Response(renderGuestPage(url, 访客订阅), { headers: { 'Content-Type': 'text/html;charset=utf-8' } });
                     } else {
+						const isLoggedIn = await isAdminLoggedIn(request, env, mytoken);
+						if (!isLoggedIn) {
+							if (request.method === 'POST') return await handleAdminLogin(request, env, url, mytoken);
+							const loginMessage = (!env.USER || !env.PASS) ? '请先在 Cloudflare 环境变量中配置 USER 和 PASS' : '';
+							return new Response(renderLoginPage(url, loginMessage), {
+								headers: {
+									'Content-Type': 'text/html;charset=utf-8',
+									'Cache-Control': 'no-store',
+								},
+							});
+						}
                         // 管理员访问：渲染拥有完整管理权限的KV编辑面板
 					    await sendMessage(`#编辑订阅 ${FileName}`, request.headers.get('CF-Connecting-IP'), `UA: ${userAgentHeader}</tg-spoiler>\n域名: ${url.hostname}\n<tg-spoiler>入口: ${url.pathname + url.search}</tg-spoiler>`);
 					    return await KV(request, env, 'LINK.txt', 访客订阅);
@@ -482,6 +494,160 @@ async function 迁移地址列表(env, txt = 'ADD.txt') {
 		return true;
 	}
 	return false;
+}
+
+function getCookie(request, name) {
+	const cookie = request.headers.get('Cookie') || '';
+	const cookies = cookie.split(';').map(item => item.trim());
+	for (const item of cookies) {
+		const index = item.indexOf('=');
+		if (index === -1) continue;
+		if (item.slice(0, index) === name) return decodeURIComponent(item.slice(index + 1));
+	}
+	return '';
+}
+
+function escapeHTML(text = '') {
+	return String(text).replace(/[&<>"']/g, char => ({
+		'&': '&amp;',
+		'<': '&lt;',
+		'>': '&gt;',
+		'"': '&quot;',
+		"'": '&#39;',
+	}[char]));
+}
+
+async function getAdminSessionValue(env, token) {
+	if (!env.USER || !env.PASS) return '';
+	return await MD5MD5(`${env.USER}:${env.PASS}:${token}:admin-login`);
+}
+
+async function isAdminLoggedIn(request, env, token) {
+	const session = await getAdminSessionValue(env, token);
+	if (!session) return false;
+	return getCookie(request, 'CF_SUB_ADMIN') === session;
+}
+
+function buildAdminCookie(value, url) {
+	const secure = url.protocol === 'https:' ? '; Secure' : '';
+	return `CF_SUB_ADMIN=${encodeURIComponent(value)}; Max-Age=604800; Path=/; HttpOnly; SameSite=Lax${secure}`;
+}
+
+async function handleAdminLogin(request, env, url, token) {
+	let username = '';
+	let password = '';
+	try {
+		const form = await request.formData();
+		username = String(form.get('username') || '');
+		password = String(form.get('password') || '');
+	} catch (error) {
+		return new Response(renderLoginPage(url, '登录请求格式不正确'), {
+			status: 400,
+			headers: {
+				'Content-Type': 'text/html;charset=utf-8',
+				'Cache-Control': 'no-store',
+			},
+		});
+	}
+
+	if (!env.USER || !env.PASS) {
+		return new Response(renderLoginPage(url, '请先在 Cloudflare 环境变量中配置 USER 和 PASS'), {
+			status: 500,
+			headers: {
+				'Content-Type': 'text/html;charset=utf-8',
+				'Cache-Control': 'no-store',
+			},
+		});
+	}
+
+	if (username === env.USER && password === env.PASS) {
+		const session = await getAdminSessionValue(env, token);
+		return new Response('', {
+			status: 302,
+			headers: {
+				'Location': url.pathname,
+				'Set-Cookie': buildAdminCookie(session, url),
+				'Cache-Control': 'no-store',
+			},
+		});
+	}
+
+	return new Response(renderLoginPage(url, '用户名或密码错误'), {
+		status: 401,
+		headers: {
+			'Content-Type': 'text/html;charset=utf-8',
+			'Cache-Control': 'no-store',
+		},
+	});
+}
+
+function renderLoginPage(url, error = '') {
+	const configNotice = error || '';
+	return `
+	<!DOCTYPE html>
+	<html>
+		<head>
+			<title>${escapeHTML(FileName)} 管理员登录</title>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<style>
+				body {
+					margin: 0;
+					padding: 15px;
+					box-sizing: border-box;
+					font-size: 13px;
+					font-family: Arial, sans-serif;
+				}
+				.login-box {
+					max-width: 360px;
+					margin-top: 18px;
+				}
+				label {
+					display: block;
+					margin: 10px 0 4px;
+				}
+				input {
+					width: 100%;
+					box-sizing: border-box;
+					padding: 8px;
+					border: 1px solid #ccc;
+					border-radius: 4px;
+					font-size: 14px;
+				}
+				button {
+					margin-top: 12px;
+					padding: 8px 16px;
+					color: #fff;
+					background: #333;
+					border: 0;
+					border-radius: 4px;
+					cursor: pointer;
+				}
+				.error {
+					color: #c00;
+					margin-top: 10px;
+				}
+			</style>
+		</head>
+		<body>
+			################################################################<br>
+			${escapeHTML(FileName)} 管理员登录<br>
+			---------------------------------------------------------------<br>
+			<div class="login-box">
+				<form method="POST" action="${escapeHTML(url.pathname)}" autocomplete="on">
+					<label for="username">用户名</label>
+					<input id="username" name="username" type="text" autocomplete="username" required autofocus>
+					<label for="password">密码</label>
+					<input id="password" name="password" type="password" autocomplete="current-password" required>
+					<button type="submit">登录</button>
+					${configNotice ? `<div class="error">${escapeHTML(configNotice)}</div>` : ''}
+				</form>
+			</div>
+			---------------------------------------------------------------<br>
+			################################################################<br>
+		</body>
+	</html>
+	`;
 }
 
 // ================= 新增：专属访客展示页渲染函数 =================
