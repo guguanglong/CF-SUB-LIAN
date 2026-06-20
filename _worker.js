@@ -576,6 +576,285 @@ async function handleAdminLogin(request, env, url, token) {
 	});
 }
 
+function getToolStyles() {
+	return `
+		* {
+			box-sizing: border-box;
+		}
+		body {
+			margin: 0;
+			background: #f7f7f5;
+			color: #202124;
+			font-family: Arial, sans-serif;
+			font-size: 14px;
+			line-height: 1.5;
+		}
+		.page {
+			width: 100%;
+			max-width: 760px;
+			margin: 0 auto;
+			padding: 18px 14px 28px;
+		}
+		.header {
+			margin-bottom: 14px;
+		}
+		.title {
+			margin: 0;
+			font-size: 22px;
+			font-weight: 700;
+			line-height: 1.2;
+		}
+		.subtitle {
+			margin-top: 5px;
+			color: #666;
+			font-size: 13px;
+		}
+		.panel {
+			background: #fff;
+			border: 1px solid #deded8;
+			border-radius: 8px;
+			padding: 14px;
+			margin-top: 12px;
+		}
+		.section-title {
+			margin: 0 0 10px;
+			font-size: 15px;
+			font-weight: 700;
+		}
+		.link-list {
+			display: grid;
+			gap: 10px;
+		}
+		.link-item {
+			border: 1px solid #e5e5df;
+			border-radius: 6px;
+			padding: 10px;
+			background: #fff;
+		}
+		.link-label {
+			font-weight: 700;
+			margin-bottom: 6px;
+		}
+		.link-url {
+			display: block;
+			width: 100%;
+			white-space: nowrap;
+			overflow-x: auto;
+			overflow-y: hidden;
+			padding: 7px 8px;
+			border: 1px solid #e5e5df;
+			border-radius: 4px;
+			background: #fafafa;
+			color: #1f4b99;
+			text-decoration: none;
+			-webkit-overflow-scrolling: touch;
+		}
+		.actions {
+			display: flex;
+			gap: 8px;
+			flex-wrap: wrap;
+			margin-top: 8px;
+		}
+		button {
+			min-height: 38px;
+			padding: 8px 14px;
+			border: 1px solid #222;
+			border-radius: 6px;
+			background: #222;
+			color: #fff;
+			font-size: 14px;
+			cursor: pointer;
+		}
+		button.secondary {
+			background: #fff;
+			color: #222;
+			border-color: #c8c8c0;
+		}
+		button:disabled {
+			opacity: 0.65;
+			cursor: default;
+		}
+		.field {
+			margin-top: 10px;
+		}
+		label {
+			display: block;
+			margin-bottom: 5px;
+			font-weight: 700;
+		}
+		input, textarea {
+			width: 100%;
+			border: 1px solid #cfcfc8;
+			border-radius: 6px;
+			background: #fff;
+			color: #202124;
+			font-size: 15px;
+		}
+		input {
+			height: 42px;
+			padding: 8px 10px;
+		}
+		textarea {
+			min-height: 300px;
+			padding: 10px;
+			line-height: 1.5;
+			resize: vertical;
+		}
+		.error {
+			color: #b00020;
+			margin-top: 10px;
+		}
+		.muted {
+			color: #666;
+			font-size: 13px;
+		}
+		.toast {
+			position: fixed;
+			left: 50%;
+			top: 50%;
+			transform: translate(-50%, -50%);
+			display: none;
+			min-width: 190px;
+			max-width: calc(100vw - 40px);
+			padding: 12px 18px;
+			text-align: center;
+			color: #fff;
+			background: rgba(0, 0, 0, 0.82);
+			border-radius: 8px;
+			z-index: 9999;
+		}
+		#current-qrcode {
+			display: none;
+			margin-top: 10px;
+			padding: 10px;
+			border: 1px solid #e5e5df;
+			border-radius: 6px;
+			background: #fff;
+			width: fit-content;
+			max-width: 100%;
+		}
+		.hidden {
+			display: none;
+		}
+	`;
+}
+
+function getSubscriptionLinks(url, token, isGuest = false) {
+	const base = isGuest ? `https://${url.hostname}/sub?token=${token}` : `https://${url.hostname}/${token}`;
+	const subBase = isGuest ? base : `${base}?sub`;
+	return [
+		['自适应订阅地址', subBase],
+		['Base64订阅地址', isGuest ? `${base}&b64` : `${base}?b64`],
+		['Clash订阅地址', isGuest ? `${base}&clash` : `${base}?clash`],
+		['Sing-box订阅地址', isGuest ? `${base}&sb` : `${base}?sb`],
+		['Surge订阅地址', isGuest ? `${base}&surge` : `${base}?surge`],
+		['Loon订阅地址', isGuest ? `${base}&loon` : `${base}?loon`],
+	];
+}
+
+function renderLinkList(links) {
+	return `
+		<div class="link-list">
+			${links.map(([label, value, displayValue]) => `
+				<div class="link-item">
+					<div class="link-label">${escapeHTML(label)}</div>
+					<a class="link-url" href="${escapeHTML(value)}" data-url="${escapeHTML(value)}">${escapeHTML(displayValue || value)}</a>
+					<div class="actions">
+						<button type="button" onclick="copySubscription(this)" data-url="${escapeHTML(value)}">复制</button>
+						<button type="button" class="secondary" onclick="showQrcode(this)" data-url="${escapeHTML(value)}">二维码</button>
+					</div>
+				</div>
+			`).join('')}
+		</div>
+	`;
+}
+
+function renderToolScripts(includeEditor = false) {
+	return `
+		<script>
+		let toastTimer;
+		function showToast(message) {
+			const toast = document.getElementById('copyNotice');
+			toast.textContent = message;
+			toast.style.display = 'block';
+			clearTimeout(toastTimer);
+			toastTimer = setTimeout(function () {
+				toast.style.display = 'none';
+			}, 1500);
+		}
+
+		function copySubscription(button) {
+			const text = button.dataset.url;
+			navigator.clipboard.writeText(text).then(function () {
+				showToast('已复制到剪贴板');
+			}).catch(function (err) {
+				console.error('复制失败:', err);
+				showToast('复制失败，请手动复制');
+			});
+		}
+
+		function showQrcode(button) {
+			const text = button.dataset.url;
+			const qrcodeDiv = document.getElementById('current-qrcode');
+			const item = button.closest('.link-item');
+			item.appendChild(qrcodeDiv);
+			qrcodeDiv.innerHTML = '';
+			qrcodeDiv.style.display = 'block';
+			new QRCode(qrcodeDiv, {
+				text: text,
+				width: 220,
+				height: 220,
+				colorDark: "#000000",
+				colorLight: "#ffffff",
+				correctLevel: QRCode.CorrectLevel.Q,
+				scale: 1
+			});
+		}
+
+		function togglePanel(id) {
+			const panel = document.getElementById(id);
+			panel.classList.toggle('hidden');
+		}
+		${includeEditor ? `
+		function replaceFullwidthColon() {
+			const textarea = document.getElementById('content');
+			textarea.value = textarea.value.replace(/：/g, ':');
+		}
+
+		function saveContent(button) {
+			const textarea = document.getElementById('content');
+			const statusElem = document.getElementById('saveStatus');
+			if (!textarea) return;
+			if (!/iPad|iPhone|iPod/.test(navigator.userAgent)) replaceFullwidthColon();
+			button.disabled = true;
+			button.textContent = '保存中';
+			fetch(window.location.href, {
+				method: 'POST',
+				body: textarea.value || '',
+				headers: {
+					'Content-Type': 'text/plain;charset=UTF-8'
+				},
+				cache: 'no-cache'
+			}).then(function (response) {
+				if (!response.ok) throw new Error('HTTP ' + response.status);
+				const now = new Date().toLocaleString();
+				textarea.defaultValue = textarea.value || '';
+				statusElem.textContent = '已保存 ' + now;
+				statusElem.style.color = '#666';
+			}).catch(function (error) {
+				console.error('Save error:', error);
+				statusElem.textContent = '保存失败: ' + error.message;
+				statusElem.style.color = '#b00020';
+			}).finally(function () {
+				button.disabled = false;
+				button.textContent = '保存';
+			});
+		}
+		` : ''}
+		</script>
+	`;
+}
+
 function renderLoginPage(url, error = '') {
 	const configNotice = error || '';
 	return `
@@ -586,60 +865,30 @@ function renderLoginPage(url, error = '') {
 			<meta charset="utf-8">
 			<meta name="viewport" content="width=device-width, initial-scale=1">
 			<style>
-				body {
-					margin: 0;
-					padding: 15px;
-					box-sizing: border-box;
-					font-size: 13px;
-					font-family: Arial, sans-serif;
-				}
-				.login-box {
-					max-width: 360px;
-					margin-top: 18px;
-				}
-				label {
-					display: block;
-					margin: 10px 0 4px;
-				}
-				input {
-					width: 100%;
-					box-sizing: border-box;
-					padding: 8px;
-					border: 1px solid #ccc;
-					border-radius: 4px;
-					font-size: 14px;
-				}
-				button {
-					margin-top: 12px;
-					padding: 8px 16px;
-					color: #fff;
-					background: #333;
-					border: 0;
-					border-radius: 4px;
-					cursor: pointer;
-				}
-				.error {
-					color: #c00;
-					margin-top: 10px;
-				}
+				${getToolStyles()}
 			</style>
 		</head>
 		<body>
-			################################################################<br>
-			${escapeHTML(FileName)} 管理员登录<br>
-			---------------------------------------------------------------<br>
-			<div class="login-box">
+			<main class="page">
+				<header class="header">
+					<h1 class="title">${escapeHTML(FileName)}订阅管理</h1>
+					<div class="subtitle">管理员登录</div>
+				</header>
+				<section class="panel">
 				<form method="POST" action="${escapeHTML(url.pathname)}" autocomplete="on">
-					<label for="username">用户名</label>
-					<input id="username" name="username" type="text" autocomplete="username" required autofocus>
-					<label for="password">密码</label>
-					<input id="password" name="password" type="password" autocomplete="current-password" required>
+					<div class="field">
+						<label for="username">用户名</label>
+						<input id="username" name="username" type="text" autocomplete="username" required autofocus>
+					</div>
+					<div class="field">
+						<label for="password">密码</label>
+						<input id="password" name="password" type="password" autocomplete="current-password" required>
+					</div>
 					<button type="submit">登录</button>
 					${configNotice ? `<div class="error">${escapeHTML(configNotice)}</div>` : ''}
 				</form>
-			</div>
-			---------------------------------------------------------------<br>
-			################################################################<br>
+				</section>
+			</main>
 		</body>
 	</html>
 	`;
@@ -647,99 +896,92 @@ function renderLoginPage(url, error = '') {
 
 // ================= 新增：专属访客展示页渲染函数 =================
 function renderGuestPage(url, guest) {
-    return `
-    <!DOCTYPE html>
-    <html>
-        <head>
-            <title>访客订阅面板 - ${FileName}</title>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <style>
-                body {
-                    margin: 0;
-                    padding: 15px;
-                    box-sizing: border-box;
-                    font-size: 13px;
-                }
-                #copyNotice {
-                    position: fixed;
-                    top: 12px;
-                    right: 12px;
-                    padding: 8px 12px;
-                    background: rgba(0, 0, 0, 0.78);
-                    color: #fff;
-                    border-radius: 4px;
-                    display: none;
-                    z-index: 9999;
-                }
-            </style>
-            <script src="https://cdn.jsdelivr.net/npm/@keeex/qrcodejs-kx@1.0.2/qrcode.min.js"></script>
-        </head>
-        <body>
-            <div id="copyNotice"></div>
-            ################################################################<br>
-            【访客专区】Subscribe / sub 订阅地址<br>
-            点击链接自动 <strong>复制订阅链接</strong> 并 <strong>生成订阅二维码</strong> <br>
-            ---------------------------------------------------------------<br>
-            自适应订阅地址:<br>
-            <a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}', this)" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}</a><br>
-            Base64订阅地址:<br>
-            <a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&b64', this)" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&b64</a><br>
-            clash订阅地址:<br>
-            <a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&clash', this)" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&clash</a><br>
-            singbox订阅地址:<br>
-            <a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&sb', this)" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&sb</a><br>
-            surge订阅地址:<br>
-            <a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&surge', this)" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&surge</a><br>
-            loon订阅地址:<br>
-            <a href="javascript:void(0)" onclick="copyToClipboard('https://${url.hostname}/sub?token=${guest}&loon', this)" style="color:blue;text-decoration:underline;cursor:pointer;">https://${url.hostname}/sub?token=${guest}&loon</a><br>
-            <div id="current-qrcode" style="display:none;margin: 10px 10px 10px 10px;"></div>
-            ---------------------------------------------------------------<br>
-            ################################################################<br>
-            <script>
-            let noticeTimer;
-            function showCopyNotice(message) {
-                const notice = document.getElementById('copyNotice');
-                notice.textContent = message;
-                notice.style.display = 'block';
-                clearTimeout(noticeTimer);
-                noticeTimer = setTimeout(() => {
-                    notice.style.display = 'none';
-                }, 1600);
-            }
+	return `
+	<!DOCTYPE html>
+	<html>
+		<head>
+			<title>${escapeHTML(FileName)}访客订阅</title>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<style>${getToolStyles()}</style>
+			<script src="https://cdn.jsdelivr.net/npm/@keeex/qrcodejs-kx@1.0.2/qrcode.min.js"></script>
+		</head>
+		<body>
+			<div id="copyNotice" class="toast"></div>
+			<main class="page">
+				<header class="header">
+					<h1 class="title">${escapeHTML(FileName)}访客订阅</h1>
+					<div class="subtitle">复制订阅链接或生成二维码</div>
+				</header>
+				<section class="panel">
+					<h2 class="section-title">订阅链接</h2>
+					${renderLinkList(getSubscriptionLinks(url, guest, true))}
+				</section>
+				<div id="current-qrcode"></div>
+			</main>
+			${renderToolScripts(false)}
+		</body>
+	</html>
+	`;
+}
 
-            function moveQrcodeBelowLink(qrcodeDiv, link) {
-                if (!link || !link.parentNode) return;
-                const nextNode = link.nextSibling;
-                const insertBeforeNode = nextNode && nextNode.nodeName === 'BR' ? nextNode.nextSibling : nextNode;
-                link.parentNode.insertBefore(qrcodeDiv, insertBeforeNode);
-                qrcodeDiv.style.display = 'block';
-            }
+function renderAdminPage(url, content, hasKV, guest, request) {
+	return `
+	<!DOCTYPE html>
+	<html>
+		<head>
+			<title>${escapeHTML(FileName)}订阅管理</title>
+			<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width, initial-scale=1">
+			<style>${getToolStyles()}</style>
+			<script src="https://cdn.jsdelivr.net/npm/@keeex/qrcodejs-kx@1.0.2/qrcode.min.js"></script>
+		</head>
+		<body>
+			<div id="copyNotice" class="toast"></div>
+			<main class="page">
+				<header class="header">
+					<h1 class="title">${escapeHTML(FileName)}订阅管理</h1>
+					<div class="subtitle">复制订阅链接、生成二维码或管理 KV 内容</div>
+				</header>
 
-            function copyToClipboard(text, link) {
-                navigator.clipboard.writeText(text).then(() => {
-                    showCopyNotice('已复制到剪贴板');
-                }).catch(err => {
-                    console.error('复制失败:', err);
-                    showCopyNotice('复制失败，请手动复制');
-                });
-                const qrcodeDiv = document.getElementById('current-qrcode');
-                moveQrcodeBelowLink(qrcodeDiv, link);
-                qrcodeDiv.innerHTML = '';
-                new QRCode(qrcodeDiv, {
-                    text: text,
-                    width: 220, 
-                    height: 220, 
-                    colorDark: "#000000", 
-                    colorLight: "#ffffff", 
-                    correctLevel: QRCode.CorrectLevel.Q, 
-                    scale: 1 
-                });
-            }
-            </script>
-        </body>
-    </html>
-    `;
+				<section class="panel">
+					<h2 class="section-title">管理员订阅链接</h2>
+					${renderLinkList(getSubscriptionLinks(url, mytoken, false))}
+				</section>
+
+				<section class="panel">
+					<h2 class="section-title">访客订阅链接</h2>
+					${renderLinkList(getSubscriptionLinks(url, guest, true))}
+				</section>
+
+				<section class="panel">
+					<h2 class="section-title">KV 管理</h2>
+					<div class="actions">
+						<button type="button" onclick="togglePanel('kvPanel')">KV管理入口</button>
+					</div>
+					<div id="kvPanel" class="hidden" style="margin-top: 12px;">
+						${hasKV ? `
+							<textarea id="content" placeholder="${decodeURIComponent(atob('TElOSyVFNyVBNCVCQSVFNCVCRSU4QiVFRiVCQyU4OCVFNCVCOCU4MCVFOCVBMSU4QyVFNCVCOCU4MCVFNCVCOCVBQSVFOCU4QSU4MiVFNyU4MiVCOSVFOSU5MyVCRSVFNiU4RSVBNSVFNSU4RCVCMyVFNSU4RiVBRiVFRiVCQyU4OSVFRiVCQyU5QQp2bGVzcyUzQSUyRiUyRjI0NmFhNzk1LTA2MzctNGY0Yy04ZjY0LTJjOGZiMjRjMWJhZCU0MDEyNy4wLjAuMSUzQTEyMzQlM0ZlbmNyeXB0aW9uJTNEbm9uZSUyNnNlY3VyaXR5JTNEdGxzJTI2c25pJTNEVEcuQ01MaXVzc3NzLmxvc2V5b3VyaXAuY29tJTI2YWxsb3dJbnNlY3VyZSUzRDElMjZ0eXBlJTNEd3MlMjZob3N0JTNEVEcuQ01MaXVzc3NzLmxvc2V5b3VyaXAuY29tJTI2cGF0aCUzRCUyNTJGJTI1M0ZlZCUyNTNEMjU2MCUyM0NGbmF0CnRyb2phbiUzQSUyRiUyRmFhNmRkZDJmLWQxY2YtNGE1Mi1iYTFiLTI2NDBjNDFhNzg1NiU0MDIxOC4xOTAuMjMwLjIwNyUzQTQxMjg4JTNGc2VjdXJpdHklM0R0bHMlMjZzbmklM0RoazEyLmJpbGliaWxpLmNvbSUyNmFsbG93SW5zZWN1cmUlM0QxJTI2dHlwZSUzRHRjcCUyNmhlYWRlclR5cGUlM0Rub25lJTIzSEsKc3MlM0ElMkYlMkZZMmhoWTJoaE1qQXRhV1YwWmkxd2IyeDVNVE13TlRveVJYUlFjVzQyU0ZscVZVNWpTRzlvVEdaVmNFWlJkMjVtYWtORFVUVnRhREZ0U21SRlRVTkNkV04xVjFvNVVERjFaR3RTUzBodVZuaDFielUxYXpGTFdIb3lSbTgyYW5KbmRERTRWelkyYjNCMGVURmxOR0p0TVdwNlprTm1RbUklMjUzRCU0MDg0LjE5LjMxLjYzJTNBNTA4NDElMjNERQoKCiVFOCVBRSVBMiVFOSU5OCU4NSVFOSU5MyVCRSVFNiU4RSVBNSVFNyVBNCVCQSVFNCVCRSU4QiVFRiVCQyU4OCVFNCVCOCU4MCVFOCVBMSU4QyVFNCVCOCU4MCVFNiU5RCVBMSVFOCVBRSVBMiVFOSU5OCU4NSVFOSU5MyVCRSVFNiU4RSVBNSVFNSU4RCVCMyVFNSU4RiVBRiVFRiVCQyU4OSVFRiVCQyU5QQpodHRwcyUzQSUyRiUyRnN1Yi54Zi5mcmVlLmhyJTJGYXV0bw=='))}">${escapeHTML(content)}</textarea>
+							<div class="actions">
+								<button type="button" onclick="saveContent(this)">保存</button>
+								<span id="saveStatus" class="muted"></span>
+							</div>
+						` : '<p class="muted">请绑定变量名称为 KV 的 KV 命名空间</p>'}
+					</div>
+				</section>
+
+				<section class="panel">
+					<h2 class="section-title">订阅转换配置</h2>
+					<div class="muted">SUBAPI: ${escapeHTML(`${subProtocol}://${subConverter}`)}</div>
+					<div class="muted">SUBCONFIG: ${escapeHTML(subConfig)}</div>
+					<div class="muted">UA: ${escapeHTML(request.headers.get('User-Agent') || '')}</div>
+				</section>
+				<div id="current-qrcode"></div>
+			</main>
+			${renderToolScripts(true)}
+		</body>
+	</html>
+	`;
 }
 // =================================================================
 
@@ -770,7 +1012,9 @@ async function KV(request, env, txt = 'ADD.txt', guest) {
 			}
 		}
 
-		const html = `
+		const html = renderAdminPage(url, content, hasKV, guest, request);
+		/*
+		const oldHtml = `
 			<!DOCTYPE html>
 			<html>
 				<head>
@@ -1075,6 +1319,7 @@ async function KV(request, env, txt = 'ADD.txt', guest) {
 			</html>
 		`;
 
+		*/
 		return new Response(html, {
 			headers: { "Content-Type": "text/html;charset=utf-8" }
 		});
